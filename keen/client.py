@@ -2,42 +2,12 @@ import base64
 import copy
 import json
 import sys
-from Queue import Queue
-from threading import Thread
 from keen import persistence_strategies, exceptions, saved_queries
 from keen.api import KeenApi
 from keen.persistence_strategies import BasePersistenceStrategy
 
+
 __author__ = 'dkador'
-
-
-class EventPusher(object):
-    """
-    A keen event pusher; This will be used to push the keen event/s
-     asynchronously
-    """
-
-    def __init__(self, eventqueue, persistence_strategy_obj):
-        """
-        Initializes the async keen event pusher thread
-        :param eventqueue: a python Queue container that holds the event objects
-        :param persistence_strategy_obj: a persistence strategy object that
-         will be do the actual pushing of the event/s according to its immplementation
-        """
-        Thread.__init__(self)
-        self.daemon = True
-        self.event_queue = eventqueue        
-        self.persistent_strat_obj = persistence_strategy_obj
-
-    def run(self):
-        while not self.event_queue.empty():
-            # batch events are pushed as a dictionary of events so by simply
-            # checking the type of event object we can determine if they are batch or not
-            event_obj = self.event_queue.get()
-            if isinstance(event_obj, dict):
-                self.persistent_strat_obj.batch_persist(event_obj)
-            else:
-                self.persistent_strat_obj.persist(event_obj)
 
 
 class Event(object):
@@ -128,12 +98,7 @@ class KeenClient(object):
         self.persistence_strategy = persistence_strategy
         self.get_timeout = get_timeout
         self.post_timeout = post_timeout
-        self.saved_queries = saved_queries.SavedQueriesInterface(project_id, master_key, read_key)      
-        
-        # setup the queue used for storing event during the async push
-        self.event_queue = Queue()  
-        # setup the event pusher handle here 
-        self.event_pusher = EventPusher(self.event_queue, self.persistence_strategy)
+        self.saved_queries = saved_queries.SavedQueriesInterface(project_id, master_key, read_key)              
 
     if sys.version_info[0] < 3:
         @staticmethod
@@ -150,17 +115,7 @@ class KeenClient(object):
             ''' Python 3.x-compatible string typecheck. '''
 
             if not project_id or not isinstance(project_id, str):
-                raise exceptions.InvalidProjectIdError(project_id)
-    
-    def _trigger_pusher(self):
-        """
-        Initializes event pusher thread so that it can consume from the 
-        event queue
-        """
-        if not self.event_pusher or not self.event_pusher.is_alive():
-            self.event_pusher = EventPusher(self.event_queue, self.persistence_strategy)
-        
-        self.event_pusher.start()
+                raise exceptions.InvalidProjectIdError(project_id)  
 
     def add_event(self, event_collection, event_body, timestamp=None):
         """ Adds an event.

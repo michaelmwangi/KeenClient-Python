@@ -13,8 +13,38 @@ from keen import exceptions
 # json
 from requests.compat import json
 
+# async worker
+import sys
+from threading import Thread
+if sys.version[0] == '2':
+    from Queue import Queue
+else:
+    # python 3 
+    from queue import Queue
 
 __author__ = 'dkador'
+
+
+class AsyncWorker(Thread):
+    """
+    A keen async worker; This will be used to process keen 'jobs'
+     asynchronously
+    """
+
+    def __init__(self, eventqueue):
+        """
+        Initializes the async keen worker
+        :param eventqueue: a python Queue container that holds the keen jobs
+        """
+        Thread.__init__(self)
+        self.daemon = True
+        self.event_queue = eventqueue        
+
+    def run(self):
+        while not self.event_queue.empty():
+            
+
+
 
 
 class HTTPMethods(object):
@@ -55,7 +85,7 @@ class KeenApi(object):
     # __init__ create keenapi object whenever KeenApi class is invoked
     def __init__(self, project_id, write_key=None, read_key=None,
                  base_url=None, api_version=None, get_timeout=None, post_timeout=None,
-                 master_key=None):
+                 master_key=None, async=False, async_callback=None):
         """
         Initializes a KeenApi object
 
@@ -69,6 +99,8 @@ class KeenApi(object):
         :param get_timeout: optional, the timeout on GET requests
         :param post_timeout: optional, the timeout on POST requests
         :param master_key: a Keen IO Master API Key, needed for deletes
+        :param async: optional boolean flag for asynchronous processing of events
+        :param async_callback: optional callback function that is called by the async worker  
         """
         # super? recreates the object with values passed into KeenApi
         super(KeenApi, self).__init__()
@@ -80,14 +112,34 @@ class KeenApi(object):
             self.base_url = base_url
         if api_version:
             self.api_version = api_version
+        if async:
+            self.job_queue = Queue()
+            self.callback = async_callback
+            self.async_worker = AsyncWorker(self.job_queue)
         self.get_timeout = get_timeout
         self.post_timeout = post_timeout
-        self.session = self._create_session()
+        self.session = self._create_session()        
+
+    def _probe_async_worker(self):
+        """
+        Initializes async worker so that it can consume from the 
+        job queue
+        """        
+        if not self.event_pusher.is_alive():
+            self.async_worker = AsyncWorker(self.job_queue)
+        
+        self.async_worker.start()
 
     def fulfill(self, method, *args, **kwargs):
 
         """ Fulfill an HTTP request to Keen's API. """
-
+        if async:
+            # job -> (http_method, callback, *args, **kwargs)
+            job = (method, self.callback, *args, **kwargs)
+            self.job_queue.put(job)
+            self._probe_async_worker()
+            return "ACK"
+            
         return getattr(self.session, method)(*args, **kwargs)
 
     def post_event(self, event):
